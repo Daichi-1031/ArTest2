@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WEB AR</title>
+  <script src="https://aframe.io/releases/1.2.0/aframe.min.js"></script>
+  <script src="https://cdn.rawgit.com/jeromeetienne/ar.js/2.0.1/aframe/build/aframe-ar.min.js"></script>
+  <style>
+    #buttons {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      z-index: 1000;
+    }
+    button {
+      margin: 5px;
+      padding: 10px;
+    }
+  </style>
+</head>
+<body>
+  <div id="buttons">
+    <button id="capture">キャプチャ</button>
+    <button id="record">録画開始</button>
+    <button id="stopRecord" style="display:none;">録画停止</button>
+  </div>
+
+  <a-scene embedded arjs>
+    <a-marker preset="hiro">
+      <a-box position="0 0.5 0" color="red" id="movable-box"></a-box>
+    </a-marker>
+    <a-entity camera></a-entity>
+  </a-scene>
+
+  <script>
+    let box = document.getElementById('movable-box');
+    let isDragging = false;
+    let isFixed = false;
+    let recorder, chunks = [];
+
+    // タッチ操作のイベントリスナー
+    box.addEventListener('mousedown', startDrag);
+    box.addEventListener('touchstart', startDrag);
+    box.addEventListener('mouseup', endDrag);
+    box.addEventListener('touchend', endDrag);
+    document.addEventListener('mousemove', drag);
+    document.addEventListener('touchmove', drag);
+
+    function startDrag(e) {
+      if (!isFixed) {
+        isDragging = true;
+      }
+    }
+
+    function endDrag(e) {
+      isDragging = false;
+    }
+
+    function drag(e) {
+      if (isDragging) {
+        let touch = e.touches ? e.touches[0] : e;
+        box.setAttribute('position', `${touch.clientX / 100 - 3} 0.5 ${touch.clientY / 100 - 3}`);
+      }
+    }
+
+    // コンテンツ固定/解除のトグル
+    box.addEventListener('dblclick', () => {
+      isFixed = !isFixed;
+      box.setAttribute('color', isFixed ? 'blue' : 'red');
+    });
+
+    // キャプチャ機能
+    document.getElementById('capture').addEventListener('click', () => {
+      const canvas = document.querySelector('canvas');
+      canvas.toBlob(blob => {
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = 'capture.png';
+        link.click();
+      });
+    });
+
+    // 録画機能
+    document.getElementById('record').addEventListener('click', () => {
+      const canvas = document.querySelector('canvas');
+      const stream = canvas.captureStream();
+      recorder = new MediaRecorder(stream);
+      recorder.ondataavailable = e => chunks.push(e.data);
+      recorder.onstop = () => {
+        const blob = new Blob(chunks, { type: 'video/webm' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = 'recording.webm';
+        link.click();
+      };
+      recorder.start();
+      document.getElementById('record').style.display = 'none';
+      document.getElementById('stopRecord').style.display = 'inline';
+    });
+
+    // 録画停止機能
+    document.getElementById('stopRecord').addEventListener('click', () => {
+      recorder.stop();
+      document.getElementById('record').style.display = 'inline';
+      document.getElementById('stopRecord').style.display = 'none';
+      chunks = [];
+    });
+  </script>
+</body>
+</html>
