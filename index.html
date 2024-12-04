@@ -1,111 +1,97 @@
-<!DOCTYPE html>
-<html lang="ja">
+<!doctype html>
+<html>
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>WEB AR</title>
-  <script src="https://aframe.io/releases/1.2.0/aframe.min.js"></script>
-  <script src="https://cdn.rawgit.com/jeromeetienne/ar.js/2.0.1/aframe/build/aframe-ar.min.js"></script>
-  <style>
-    #buttons {
-      position: absolute;
-      top: 10px;
-      left: 10px;
-      z-index: 1000;
-    }
-    button {
-      margin: 5px;
-      padding: 10px;
-    }
-  </style>
+  <meta name="viewport"
+        content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
+  <title>Hello WebXR!</title>
+
+  <!-- three.js -->
+  <script src="https://unpkg.com/three@0.126.0/build/three.js"></script>
 </head>
 <body>
-  <div id="buttons">
-    <button id="capture">キャプチャ</button>
-    <button id="record">録画開始</button>
-    <button id="stopRecord" style="display:none;">録画停止</button>
-  </div>
 
-  <a-scene embedded arjs>
-    <a-marker preset="hiro">
-      <a-box position="0 0.5 0" color="red" id="movable-box"></a-box>
-    </a-marker>
-    <a-entity camera></a-entity>
-  </a-scene>
+<!-- Starting an immersive WebXR session requires user interaction.
+    We start this one with a simple button. -->
+<button onclick="activateXR()">Start Hello WebXR</button>
+<script>
+async function activateXR() {
+  // Add a canvas element and initialize a WebGL context that is compatible with WebXR.
+  const canvas = document.createElement("canvas");
+  document.body.appendChild(canvas);
+  const gl = canvas.getContext("webgl", {xrCompatible: true});
+  const scene = new THREE.Scene();
+  
+  // The cube will have a different color on each side.
+  const materials = [
+  new THREE.MeshBasicMaterial({color: 0xff0000}),
+  new THREE.MeshBasicMaterial({color: 0x0000ff}),
+  new THREE.MeshBasicMaterial({color: 0x00ff00}),
+  new THREE.MeshBasicMaterial({color: 0xff00ff}),
+  new THREE.MeshBasicMaterial({color: 0x00ffff}),
+  new THREE.MeshBasicMaterial({color: 0xffff00})
+];
+  // Create the cube and add it to the demo scene.
+  const cube = new THREE.Mesh(new THREE.BoxBufferGeometry(0.2, 0.2, 0.2), materials);
+  cube.position.set(1, 1, 1);
+  scene.add(cube);
 
-  <script>
-    let box = document.getElementById('movable-box');
-    let isDragging = false;
-    let isFixed = false;
-    let recorder, chunks = [];
+  // Set up the WebGLRenderer, which handles rendering to the session's base layer.
+  const renderer = new THREE.WebGLRenderer({
+  alpha: true,
+  preserveDrawingBuffer: true,
+  canvas: canvas,
+  context: gl
+});
+  renderer.autoClear = false;
+  
+  // The API directly updates the camera matrices.
+  // Disable matrix auto updates so three.js doesn't attempt
+  // to handle the matrices independently.
+  const camera = new THREE.PerspectiveCamera();
+  camera.matrixAutoUpdate = false;
 
-    // タッチ操作のイベントリスナー
-    box.addEventListener('mousedown', startDrag);
-    box.addEventListener('touchstart', startDrag);
-    box.addEventListener('mouseup', endDrag);
-    box.addEventListener('touchend', endDrag);
-    document.addEventListener('mousemove', drag);
-    document.addEventListener('touchmove', drag);
+  // Initialize a WebXR session using "immersive-ar".
+  const session = await navigator.xr.requestSession("immersive-ar");
+  session.updateRenderState({
+  baseLayer: new XRWebGLLayer(session, gl)
+});
 
-    function startDrag(e) {
-      if (!isFixed) {
-        isDragging = true;
-      }
-    }
+  // A 'local' reference space has a native origin that is located
+  // near the viewer's position at the time the session was created.
+  const referenceSpace = await session.requestReferenceSpace('local');
 
-    function endDrag(e) {
-      isDragging = false;
-    }
+  // Create a render loop that allows us to draw on the AR view.
+  const onXRFrame = (time, frame) => {
+  // Queue up the next draw request.
+  session.requestAnimationFrame(onXRFrame);
 
-    function drag(e) {
-      if (isDragging) {
-        let touch = e.touches ? e.touches[0] : e;
-        box.setAttribute('position', `${touch.clientX / 100 - 3} 0.5 ${touch.clientY / 100 - 3}`);
-      }
-    }
+  // Bind the graphics framebuffer to the baseLayer's framebuffer
+  gl.bindFramebuffer(gl.FRAMEBUFFER, session.renderState.baseLayer.framebuffer)
+  
+  // Retrieve the pose of the device.
+  // XRFrame.getViewerPose can return null while the session attempts to establish tracking.
+  const pose = frame.getViewerPose(referenceSpace);
+  if (pose) {
+    // In mobile AR, we only have one view.
+    const view = pose.views[0];
 
-    // コンテンツ固定/解除のトグル
-    box.addEventListener('dblclick', () => {
-      isFixed = !isFixed;
-      box.setAttribute('color', isFixed ? 'blue' : 'red');
-    });
+    const viewport = session.renderState.baseLayer.getViewport(view);
+    renderer.setSize(viewport.width, viewport.height)
 
-    // キャプチャ機能
-    document.getElementById('capture').addEventListener('click', () => {
-      const canvas = document.querySelector('canvas');
-      canvas.toBlob(blob => {
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(blob);
-        link.download = 'capture.png';
-        link.click();
-      });
-    });
+    // Use the view's transform matrix and projection matrix to configure the THREE.camera.
+    camera.matrix.fromArray(view.transform.matrix)
+    camera.projectionMatrix.fromArray(view.projectionMatrix);
+    camera.updateMatrixWorld(true);
 
-    // 録画機能
-    document.getElementById('record').addEventListener('click', () => {
-      const canvas = document.querySelector('canvas');
-      const stream = canvas.captureStream();
-      recorder = new MediaRecorder(stream);
-      recorder.ondataavailable = e => chunks.push(e.data);
-      recorder.onstop = () => {
-        const blob = new Blob(chunks, { type: 'video/webm' });
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(blob);
-        link.download = 'recording.webm';
-        link.click();
-      };
-      recorder.start();
-      document.getElementById('record').style.display = 'none';
-      document.getElementById('stopRecord').style.display = 'inline';
-    });
-
-    // 録画停止機能
-    document.getElementById('stopRecord').addEventListener('click', () => {
-      recorder.stop();
-      document.getElementById('record').style.display = 'inline';
-      document.getElementById('stopRecord').style.display = 'none';
-      chunks = [];
-    });
-  </script>
+    // Render the scene with THREE.WebGLRenderer.
+    renderer.render(scene, camera)
+  }
+}
+    session.requestAnimationFrame(onXRFrame);
+  
+  // To be continued in upcoming steps.
+}
+</script>
 </body>
 </html>
